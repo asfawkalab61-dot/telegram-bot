@@ -1,5 +1,7 @@
 pyTelegramBotAPI==4.15.4
 flask
 gunicorn
+psycopg2-binary
+
 
 
