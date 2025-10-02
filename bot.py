@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 """)
 conn.commit()
+
 # -------------------------------
 # Database helper functions
 # -------------------------------
@@ -59,7 +60,11 @@ def start(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row("🛒 New Orders", "⭐ Favorites")
     markup.row("📂 Categories", "ℹ️ About")
-    bot.send_message(message.chat.id, "Welcome! Choose an option below:", reply_markup=markup)
+    bot.send_message(
+        message.chat.id,
+        "Welcome! Choose an option below:",
+        reply_markup=markup
+    )
 
 @bot.message_handler(func=lambda msg: msg.text == "🛒 New Orders")
 def new_orders(message):
@@ -83,9 +88,11 @@ def categories(message):
 
 @bot.message_handler(func=lambda msg: msg.text == "ℹ️ About")
 def about(message):
-    bot.send_photo(message.chat.id,
-                   photo="https://via.placeholder.com/300x200.png?text=My+Bot",
-                   caption="This is my shop bot. Order safely anytime 24/7!")
+    bot.send_photo(
+        message.chat.id,
+        photo="https://via.placeholder.com/300x200.png?text=My+Bot",
+        caption="This is my shop bot. Order safely anytime 24/7!"
+    )
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cat_"))
 def category_handler(call):
@@ -119,3 +126,4 @@ def webhook():
 # -------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
