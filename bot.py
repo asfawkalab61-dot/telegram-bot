@@ -1,166 +1,121 @@
+import os
 import telebot
 from telebot import types
-import sqlite3
-import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from flask import Flask, request
 
-# === Replace with your token ===
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+# -------------------------------
+# Setup
+# -------------------------------
+TOKEN = os.getenv("TOKEN")   # Read from environment
 bot = telebot.TeleBot(TOKEN)
 
-# === Flask app for webhooks ===
-app = Flask(__name__)
+DATABASE_URL = os.getenv("DATABASE_URL")   # Read from environment
+conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+cursor = conn.cursor()
 
-# === Database Setup ===
-def init_db():
-    conn = sqlite3.connect("data.db")
-    c = conn.cursor()
-    # Users table
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
-                    user_id INTEGER PRIMARY KEY,
-                    username TEXT
-                )""")
-    # Orders table
-    c.execute("""CREATE TABLE IF NOT EXISTS orders (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    product TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )""")
-    # Favorites table
-    c.execute("""CREATE TABLE IF NOT EXISTS favorites (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    product TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )""")
+# Create tables if not exist
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS favorites (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    item TEXT NOT NULL
+);
+""")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS orders (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    item TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+""")
+conn.commit()
+# -------------------------------
+# Database helper functions
+# -------------------------------
+def add_order(user_id, item):
+    cursor.execute("INSERT INTO orders (user_id, item) VALUES (%s, %s)", (user_id, item))
     conn.commit()
-    conn.close()
-
-init_db()
-
-# === Helper functions ===
-def add_user(user_id, username):
-    conn = sqlite3.connect("data.db")
-    c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
-    conn.commit()
-    conn.close()
-
-def add_order(user_id, product):
-    conn = sqlite3.connect("data.db")
-    c = conn.cursor()
-    c.execute("INSERT INTO orders (user_id, product) VALUES (?, ?)", (user_id, product))
-    conn.commit()
-    conn.close()
-
-def add_favorite(user_id, product):
-    conn = sqlite3.connect("data.db")
-    c = conn.cursor()
-    c.execute("INSERT INTO favorites (user_id, product) VALUES (?, ?)", (user_id, product))
-    conn.commit()
-    conn.close()
 
 def get_orders(user_id):
-    conn = sqlite3.connect("data.db")
-    c = conn.cursor()
-    c.execute("SELECT product, created_at FROM orders WHERE user_id = ?", (user_id,))
-    data = c.fetchall()
-    conn.close()
-    return data
+    cursor.execute("SELECT item FROM orders WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
+    return [row["item"] for row in cursor.fetchall()]
+
+def add_favorite(user_id, item):
+    cursor.execute("INSERT INTO favorites (user_id, item) VALUES (%s, %s)", (user_id, item))
+    conn.commit()
 
 def get_favorites(user_id):
-    conn = sqlite3.connect("data.db")
-    c = conn.cursor()
-    c.execute("SELECT product, created_at FROM favorites WHERE user_id = ?", (user_id,))
-    data = c.fetchall()
-    conn.close()
-    return data
+    cursor.execute("SELECT item FROM favorites WHERE user_id = %s", (user_id,))
+    return [row["item"] for row in cursor.fetchall()]
 
-# === Bot Handlers ===
-@bot.message_handler(commands=['start'])
+# -------------------------------
+# Bot handlers
+# -------------------------------
+@bot.message_handler(commands=["start"])
 def start(message):
-    add_user(message.from_user.id, message.from_user.username)
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("🛒 New Orders", "⭐ Favourites")
-    markup.add("📂 Categories", "ℹ️ About")
-    bot.send_message(message.chat.id, 
-                     "👋 Welcome to My Shop Bot!\n\nChoose an option below:", 
-                     reply_markup=markup)
+    markup.row("🛒 New Orders", "⭐ Favorites")
+    markup.row("📂 Categories", "ℹ️ About")
+    bot.send_message(message.chat.id, "Welcome! Choose an option below:", reply_markup=markup)
 
-@bot.message_handler(func=lambda m: m.text == "🛒 New Orders")
+@bot.message_handler(func=lambda msg: msg.text == "🛒 New Orders")
 def new_orders(message):
-    bot.send_message(message.chat.id, "Please type the product you want to order:")
-    bot.register_next_step_handler(message, save_order)
+    add_order(message.from_user.id, "Sample Product")
+    bot.send_message(message.chat.id, "Your new order has been placed!")
 
-def save_order(message):
-    add_order(message.from_user.id, message.text)
-    bot.send_message(message.chat.id, f"✅ Order saved: {message.text}")
-
-@bot.message_handler(func=lambda m: m.text == "⭐ Favourites")
-def show_favorites(message):
+@bot.message_handler(func=lambda msg: msg.text == "⭐ Favorites")
+def favorites(message):
     favs = get_favorites(message.from_user.id)
     if favs:
-        text = "⭐ Your Favorites:\n"
-        for f in favs:
-            text += f"- {f[0]} (added on {f[1]})\n"
+        bot.send_message(message.chat.id, "Your favorites:\n" + "\n".join(favs))
     else:
-        text = "You have no favorites yet."
-    bot.send_message(message.chat.id, text)
+        bot.send_message(message.chat.id, "You have no favorites yet.")
 
-@bot.message_handler(func=lambda m: m.text == "📂 Categories")
+@bot.message_handler(func=lambda msg: msg.text == "📂 Categories")
 def categories(message):
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📱 Electronics", callback_data="cat_electronics"))
-    markup.add(types.InlineKeyboardButton("👟 Shoes", callback_data="cat_shoes"))
-    bot.send_message(message.chat.id, "📂 Choose a category:", reply_markup=markup)
+    markup.add(types.InlineKeyboardButton("Electronics", callback_data="cat_electronics"))
+    markup.add(types.InlineKeyboardButton("Shoes", callback_data="cat_shoes"))
+    bot.send_message(message.chat.id, "Choose a category:", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("cat_"))
-def category_selected(call):
-    if call.data == "cat_electronics":
-        product = "iPhone 14 - $999"
-    else:
-        product = "Nike Air Max - $120"
-
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("⭐ Add to Favorites", callback_data=f"fav_{product}"))
-    markup.add(types.InlineKeyboardButton("🛒 Order Now", callback_data=f"order_{product}"))
-
-    bot.send_message(call.message.chat.id, f"📦 {product}", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("fav_"))
-def add_to_fav(call):
-    product = call.data.replace("fav_", "")
-    add_favorite(call.from_user.id, product)
-    bot.answer_callback_query(call.id, "⭐ Added to favorites!")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("order_"))
-def order_now(call):
-    product = call.data.replace("order_", "")
-    add_order(call.from_user.id, product)
-    bot.answer_callback_query(call.id, f"✅ Order placed: {product}")
-
-@bot.message_handler(func=lambda m: m.text == "ℹ️ About")
+@bot.message_handler(func=lambda msg: msg.text == "ℹ️ About")
 def about(message):
     bot.send_photo(message.chat.id,
-                   photo="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg",
-                   caption="🤖 *My Shop Bot*\n\nYour friendly shopping assistant.\nBrowse categories, save favorites, and place orders easily!",
-                   parse_mode="Markdown")
+                   photo="https://via.placeholder.com/300x200.png?text=My+Bot",
+                   caption="This is my shop bot. Order safely anytime 24/7!")
 
-# === Flask Routes for Webhook ===
-@app.route("/" + TOKEN, methods=['POST'])
-def webhook():
-    json_str = request.get_data().decode("UTF-8")
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cat_"))
+def category_handler(call):
+    if call.data == "cat_electronics":
+        bot.send_message(call.message.chat.id, "Electronics:\n- Phone\n- Laptop")
+        add_favorite(call.from_user.id, "Electronics Category")
+    elif call.data == "cat_shoes":
+        bot.send_message(call.message.chat.id, "Shoes:\n- Sneakers\n- Sandals")
+        add_favorite(call.from_user.id, "Shoes Category")
+
+# -------------------------------
+# Flask Webhook Setup (for Render)
+# -------------------------------
+app = Flask(__name__)
+
+@app.route("/" + TOKEN, methods=["POST"])
+def getMessage():
+    json_str = request.stream.read().decode("UTF-8")
     update = telebot.types.Update.de_json(json_str)
     bot.process_new_updates([update])
     return "OK", 200
 
 @app.route("/")
-def index():
-    return "🤖 Bot is running with webhooks!", 200
+def webhook():
+    bot.remove_webhook()
+    bot.set_webhook(url="https://telegram-bot-bymv.onrender.com/" + TOKEN)
+    return "Bot is running!", 200
 
-# === Start Flask server ===
+# -------------------------------
+# Run local (for testing only)
+# -------------------------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
-
+    app.run(host="0.0.0.0", port=5000)
