@@ -57,6 +57,7 @@ def get_favorites(user_id):
 # -------------------------------
 @bot.message_handler(commands=["start"])
 def start(message):
+    print("START command received from:", message.from_user.id, flush=True)
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row("🛒 New Orders", "⭐ Favorites")
     markup.row("📂 Categories", "ℹ️ About")
