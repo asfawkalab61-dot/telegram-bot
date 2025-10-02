@@ -8,10 +8,10 @@ from flask import Flask, request
 # -------------------------------
 # Setup
 # -------------------------------
-TOKEN = os.getenv("TOKEN")   # Read from environment
+TOKEN = os.getenv("TOKEN")   # Bot token from environment
 bot = telebot.TeleBot(TOKEN)
 
-DATABASE_URL = os.getenv("DATABASE_URL")   # Read from environment
+DATABASE_URL = os.getenv("DATABASE_URL")   # Postgres connection from environment
 conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 cursor = conn.cursor()
 
@@ -57,7 +57,7 @@ def get_favorites(user_id):
 # -------------------------------
 @bot.message_handler(commands=["start"])
 def start(message):
-    print("START command received from:", message.from_user.id, flush=True)
+    print(f"✅ /start received from: {message.from_user.username}")
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row("🛒 New Orders", "⭐ Favorites")
     markup.row("📂 Categories", "ℹ️ About")
@@ -117,9 +117,7 @@ def getMessage():
     return "OK", 200
 
 @app.route("/")
-def webhook():
-    bot.remove_webhook()
-    bot.set_webhook(url="https://telegram-bot-bymv.onrender.com/" + TOKEN)
+def home():
     return "Bot is running!", 200
 
 # -------------------------------
